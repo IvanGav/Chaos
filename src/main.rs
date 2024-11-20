@@ -1,4 +1,6 @@
 use bevy::input::common_conditions::{input_just_pressed, input_pressed};
+use bevy::math::VectorSpace;
+use bevy::render::camera::ScalingMode;
 use bevy::{diagnostic::FrameTimeDiagnosticsPlugin, prelude::*, window::PrimaryWindow};
 use bevy::color::palettes::css::*;
 use rand::Rng;
@@ -73,7 +75,7 @@ impl ParticleBundle {
 #[derive(Bundle, Default)]
 pub struct MainCameraBundle {
     main_cam: MainCamera,
-    sprite_bundle: Camera2dBundle,
+    camera_3d_bundle: Camera3dBundle,
 }
 
 /*
@@ -120,7 +122,17 @@ fn transform_particle_system(mut particles: Query<(&Particle, &mut Transform)>) 
 }
 
 fn init_camera_system(mut cmd: Commands) {
-    cmd.spawn(MainCameraBundle::default());
+    cmd.spawn(MainCameraBundle {
+        camera_3d_bundle: Camera3dBundle {
+            projection: OrthographicProjection {
+                    scaling_mode: ScalingMode::FixedVertical(16.0),
+                    ..default()
+                }.into(),
+            transform: Transform::from_xyz(0.0, 0.0, 100.0).looking_at(Vec3::ZERO, Vec3::Y),
+            ..default()
+        },
+        ..default()
+    });
 }
 
 /*
