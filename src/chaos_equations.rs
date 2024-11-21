@@ -1,8 +1,22 @@
+use std::ops::Add;
+
 #[derive(Clone, Copy)]
 pub struct Coord {
     pub x:f64,
     pub y:f64,
     pub z:f64
+}
+
+impl Add for Coord {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        Self {
+            x: self.x + other.x,
+            y: self.y + other.y,
+            z: self.z + other.z,
+        }
+    }
 }
 
 pub type ChaosEq = fn(&Coord, dt: f64) -> Coord;
