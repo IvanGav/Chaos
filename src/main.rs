@@ -76,7 +76,7 @@ impl Default for PanOrbitSettings {
     fn default() -> Self {
         PanOrbitSettings {
             pan_sensitivity: 0.001, // 1000 pixels per world unit
-            orbit_sensitivity: -0.1f32.to_radians(), // 0.1 degree per pixel
+            orbit_sensitivity: 0.1f32.to_radians(), // 0.1 degree per pixel
             zoom_sensitivity: 0.01,
             pan_key: Some(KeyCode::ControlLeft),
             orbit_key: Some(KeyCode::AltLeft),
@@ -92,6 +92,9 @@ fn spawn_camera(mut commands: Commands) {
     let mut camera = PanOrbitCameraBundle::default();
     // Position our camera using our component,
     // not Transform (it would get overwritten)
+    if let bevy::prelude::Projection::Perspective(ref mut pp) = camera.camera.projection {
+        pp.fov = CAMERA_FOV;
+    }
     camera.state.center = Vec3::new(0.0, 0.0, 0.0);
     camera.state.radius = 400.0;
     camera.state.pitch = 0.0; //15.0f32.to_radians();
@@ -208,7 +211,7 @@ fn pan_orbit_camera(
         if total_orbit != Vec2::ZERO {
             any = true;
             state.yaw += total_orbit.x;
-            state.pitch += total_orbit.y;
+            state.pitch -= total_orbit.y;
             // wrap around, to stay between +- 180 degrees
             if state.yaw > PI {
                 state.yaw -= TAU; // 2 * PI
@@ -255,8 +258,18 @@ fn pan_orbit_camera(
     Constants
 */
 
+pub const VIRT_ZOOM: f64 = 10.0;
+
 pub const COLOR_PARTICLE: Color = Color::Srgba(WHITE_SMOKE);
 pub const SIZE_PARTICLE: f32 = 5.0;
+pub const LIGHT_STRENGTH: f32 = 5000.0;
+pub const LIGHT_COLOR: Color = Color::Srgba(WHITE); //GREEN_YELLOW
+
+pub const GIZMOS_AXES_LENGTH: f32 = 100.0;
+
+pub const CAMERA_FOV: f32 = 1.1; //0.785398; //45 degrees as radians
+
+pub const SIM_DT: f64 = 0.006;
 
 /*
     Resources
@@ -268,6 +281,7 @@ struct ChaosEquationResource(pub chaos::ChaosEq);
 impl FromWorld for ChaosEquationResource {
     fn from_world(_world: &mut World) -> Self {
         return ChaosEquationResource(chaos_equations::lorenz_attractor_equation);
+        // return ChaosEquationResource(chaos_equations::basic_equation);
     }
 }
 
@@ -277,8 +291,8 @@ pub struct CubeMeshMaterial(pub Handle<Mesh>, pub Handle<StandardMaterial>);
 
 impl FromWorld for CubeMeshMaterial {
     fn from_world(world: &mut World) -> Self {
-        let mesh = world.get_resource_mut::<Assets<Mesh>>().unwrap().add(Cuboid::new(1.0, 1.0, 1.0));
-        let material =  world.get_resource_mut::<Assets<StandardMaterial>>().unwrap().add(Color::srgb_u8(255, 255,255));
+        let mesh = world.get_resource_mut::<Assets<Mesh>>().unwrap().add(Cuboid::new(SIZE_PARTICLE, SIZE_PARTICLE, SIZE_PARTICLE));
+        let material =  world.get_resource_mut::<Assets<StandardMaterial>>().unwrap().add(COLOR_PARTICLE);
         return CubeMeshMaterial(mesh,material);
 
     }
@@ -301,18 +315,12 @@ struct Particle(pub chaos::Coord);
 #[derive(Bundle)]
 pub struct ParticleBundle {
     particle: Particle,
-    // sprite_bundle: SpriteBundle,
     pbr_bundle: PbrBundle,
 }
 impl ParticleBundle {
     pub fn from_world_xy(x: f32, y: f32, asset: &CubeMeshMaterial)->Self {
         return Self {
             particle: Particle(world_to_virt_coord(x, y, 0.0)),
-            // sprite_bundle: SpriteBundle {
-            //     sprite: Sprite { color: COLOR_PARTICLE, custom_size: Some(Vec2::splat(SIZE_PARTICLE)), ..default() },
-            //     transform: Transform::from_xyz(x, y, 1.0),
-            //     ..default()
-            // },
             pbr_bundle: PbrBundle {
                 mesh: asset.0.clone(),
                 material: asset.1.clone(),
@@ -324,12 +332,6 @@ impl ParticleBundle {
     pub fn from_coord(c: chaos::Coord, asset: &CubeMeshMaterial)->Self {
         return Self {
             particle: Particle(c),
-            // sprite_bundle: SpriteBundle {
-            //     sprite: Sprite { color: COLOR_PARTICLE, custom_size: Some(Vec2::splat(SIZE_PARTICLE)), ..default() },
-            //     transform: virt_to_world(&c),
-            //     ..default()
-            // },
-            
             pbr_bundle: PbrBundle {
                 mesh: asset.0.clone(),
                 material: asset.1.clone(),
@@ -340,50 +342,57 @@ impl ParticleBundle {
     }
 }
 
-// #[derive(Bundle, Default)]
-// pub struct MainCameraBundle {
-//     main_cam: MainCamera,
-//     camera_3d_bundle: Camera3dBundle,
-// }
-
 /*
     Systems
 */
 
 fn draw_axes(mut gizmos: Gizmos) {
-    gizmos.axes(Transform::default(), 100.0);
+    gizmos.axes(Transform::default(), GIZMOS_AXES_LENGTH);
 }
 
 fn mouse_click_system(
     mut cmd: Commands, 
     q_window: Query<&Window, With<PrimaryWindow>>,
-    q_camera: Query<(&Camera, &GlobalTransform)>,
+    // q_camera: Query<(&Camera, &GlobalTransform)>,
     cube_mesh_material: Res<CubeMeshMaterial>,
+    q_camera: Query<(
+        &PanOrbitState,
+        &Transform,
+    )>
 ) {
-    let (camera, camera_transform) = q_camera.single();
+    // let (camera, camera_transform) = q_camera.single();
     let window = q_window.single();
     let mut rng = rand::thread_rng();
+    
+    for (state, transform) in &q_camera {
 
-    if let Some(world_position) = window.cursor_position()
-        .and_then(|cursor| camera.viewport_to_world(camera_transform, cursor))
-        .map(|ray| ray.origin.xy())
-    {
-        for _ in 0..20 {
-            // cmd.spawn(ParticleBundle::from_coord(world_to_virt_coord(2.0, 1.0, 1.0)));
-            let dx = rng.gen::<f64>().fract();
-            let dy = rng.gen::<f64>().fract();
-            let dz = rng.gen::<f64>().fract();
-            cmd.spawn(ParticleBundle::from_coord(
-                chaos::Coord{x:dx,y:dy,z:dz} + screen_to_virt(world_position.x,world_position.y),
-                &cube_mesh_material
-            ));
+        if let Some(world_position) = window.cursor_position() {
+            let half_height = window.height()/2.0;
+            let half_width = window.width()/2.0;
+            let px = (world_position.x / half_width) - 1.0;
+            let py = (world_position.y / half_height) - 1.0;
+            let dx = state.radius * (CAMERA_FOV / 2.0).tan() * px * (half_width/half_height);
+            let dy = state.radius * (CAMERA_FOV / 2.0).tan() * py; //fov is vertical AND half of CAMERA_FOV (half screen, it's weird)
+            let spawn_at = state.center + transform.down()*dy + transform.right()*dx;
+            
+            // for _ in 0..20 {
+            //     // cmd.spawn(ParticleBundle::from_coord(world_to_virt_coord(2.0, 1.0, 1.0)));
+            //     let dx = rng.gen::<f64>().fract();
+            //     let dy = rng.gen::<f64>().fract();
+            //     let dz = rng.gen::<f64>().fract();
+            //     cmd.spawn(ParticleBundle::from_coord(
+            //         chaos::Coord{x:dx,y:dy,z:dz} + world_to_virt_coord(spawn_at.x, spawn_at.y, spawn_at.z),
+            //         &cube_mesh_material
+            //     ));
+            // }
+            cmd.spawn(ParticleBundle::from_coord(world_to_virt_coord(spawn_at.x, spawn_at.y, spawn_at.z), &cube_mesh_material));
         }
     }
 }
 
 fn vmove_particle_system(mut particles: Query<&mut Particle>, chaos_eq: Res<ChaosEquationResource>) {
     for mut particle in &mut particles {
-        particle.0 = chaos_eq.0(&particle.0,0.004);
+        particle.0 = chaos_eq.0(&particle.0,SIM_DT);
     }
 }
 
@@ -393,20 +402,27 @@ fn transform_particle_system(mut particles: Query<(&Particle, &mut Transform)>) 
     }
 }
 
-///my own code; probably not very useful any longer
-// fn init_camera_system(mut cmd: Commands) {
-//     cmd.spawn(MainCameraBundle {
-//         camera_3d_bundle: Camera3dBundle {
-//             projection: OrthographicProjection {
-//                     scaling_mode: ScalingMode::FixedVertical(200.0),
-//                     ..default()
-//                 }.into(),
-//             transform: Transform::from_xyz(0.0, 0.0, 200.0).looking_at(Vec3::ZERO, Vec3::Y),
-//             ..default()
-//         },
-//         ..default()
-//     });
-// }
+fn init_lighting(mut cmd: Commands) {
+    // ambient light
+    cmd.insert_resource(AmbientLight {
+        color: LIGHT_COLOR.into(),
+        brightness: LIGHT_STRENGTH,
+    });
+
+    // cmd.spawn(SpotLightBundle {
+    //     // transform: Transform::from_xyz(-1.0, 2.0, 0.0)
+    //     //     .looking_at(Vec3::new(-1.0, 0.0, 0.0), Vec3::Z),
+    //     spot_light: SpotLight {
+    //         intensity: 100_000.0,
+    //         color: LIME.into(),
+    //         shadows_enabled: true,
+    //         inner_angle: 0.6,
+    //         outer_angle: 0.8,
+    //         ..default()
+    //     },
+    //     ..default()
+    // });
+}
 
 /*
     Plugins
@@ -419,11 +435,11 @@ impl Plugin for ChaosPlugin {
         app
             .init_resource::<ChaosEquationResource>()
             .init_resource::<CubeMeshMaterial>()
-            // .add_systems(Startup, init_camera_system)
             .add_systems(Startup, spawn_camera)
+            .add_systems(Startup, init_lighting)
             .add_systems(FixedUpdate, vmove_particle_system)
             .add_systems(Update, transform_particle_system)
-            .add_systems(Update, mouse_click_system.run_if(input_just_pressed(MouseButton::Left)))
+            .add_systems(Update, mouse_click_system.run_if(input_pressed(MouseButton::Left)))
             .add_systems(Update, draw_axes)
             .add_systems(Update,
                 pan_orbit_camera
@@ -436,32 +452,30 @@ impl Plugin for ChaosPlugin {
     Helper functions
 */
 
-const ZOOM: f64 = 10.0;
-
 fn world_to_virt_coord(x: f32, y: f32, z: f32)->chaos::Coord {
     return chaos::Coord {
-        x: x as f64 / ZOOM,
-        y: y as f64 / ZOOM,
-        z: z as f64 / ZOOM,
+        x: x as f64 / VIRT_ZOOM,
+        y: y as f64 / VIRT_ZOOM,
+        z: z as f64 / VIRT_ZOOM,
     };
 }
 
 fn world_to_virt(t: &Transform)->chaos::Coord {
     return chaos::Coord {
-        x: t.translation.x as f64 / ZOOM,
-        y: t.translation.y as f64 / ZOOM,
-        z: t.translation.z as f64 / ZOOM,
+        x: t.translation.x as f64 / VIRT_ZOOM,
+        y: t.translation.y as f64 / VIRT_ZOOM,
+        z: t.translation.z as f64 / VIRT_ZOOM,
     };
 }
 
 fn virt_to_world(c: &chaos::Coord)->Transform {
-    return Transform::from_xyz((c.x * ZOOM) as f32, (c.y * ZOOM) as f32, (c.z * ZOOM) as f32);
+    return Transform::from_xyz((c.x * VIRT_ZOOM) as f32, (c.y * VIRT_ZOOM) as f32, (c.z * VIRT_ZOOM) as f32);
 }
 
 fn virt_to_world_mut(c: &chaos::Coord, t: &mut Transform) {
-    t.translation.x = (c.x * ZOOM) as f32;
-    t.translation.y = (c.y * ZOOM) as f32;
-    t.translation.z = (c.z * ZOOM) as f32;
+    t.translation.x = (c.x * VIRT_ZOOM) as f32;
+    t.translation.y = (c.y * VIRT_ZOOM) as f32;
+    t.translation.z = (c.z * VIRT_ZOOM) as f32;
 }
 
 fn screen_to_virt(x: f32, y: f32)->chaos::Coord {
