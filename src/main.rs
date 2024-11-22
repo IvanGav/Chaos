@@ -1,6 +1,5 @@
 use bevy::ecs::system::SystemId;
-use bevy::input::common_conditions::{input_just_pressed, input_pressed};
-// use bevy::render::camera::ScalingMode;
+use bevy::input::common_conditions::input_pressed;
 use bevy::{prelude::*, window::PrimaryWindow};
 use bevy::color::palettes::css::*;
 use rand::Rng;
@@ -612,14 +611,13 @@ impl Plugin for ChaosPlugin {
             .add_systems(Startup, init_text)
             .add_systems(FixedUpdate, vmove_particle_system)
             .add_systems(Update, transform_particle_system)
-            .add_systems(Update, mouse_click_system.run_if(input_pressed(MouseButton::Left)))
+            .add_systems(Update, mouse_click_system
+                .run_if(input_pressed(MouseButton::Left)))
             .add_systems(Update, draw_axes)
             .add_systems(Update, keybind_listener)
             .add_systems(Update, display_stats)
-            .add_systems(Update,
-                pan_orbit_camera
-                    .run_if(any_with_component::<PanOrbitState>),
-            );
+            .add_systems(Update, pan_orbit_camera
+                    .run_if(any_with_component::<PanOrbitState>));
     }
 }
 
@@ -632,14 +630,6 @@ fn world_to_virt_coord(x: f32, y: f32, z: f32)->chaos::Coord {
         x: x as f64 / VIRT_ZOOM,
         y: y as f64 / VIRT_ZOOM,
         z: z as f64 / VIRT_ZOOM,
-    };
-}
-
-fn _world_to_virt(t: &Transform)->chaos::Coord {
-    return chaos::Coord {
-        x: t.translation.x as f64 / VIRT_ZOOM,
-        y: t.translation.y as f64 / VIRT_ZOOM,
-        z: t.translation.z as f64 / VIRT_ZOOM,
     };
 }
 
