@@ -267,11 +267,11 @@ pub const VIRT_ZOOM: f64 = 10.0;
 pub const COLOR_PARTICLE: Color = Color::Srgba(WHITE_SMOKE);
 pub const SIZE_PARTICLE: f32 = 5.0;
 pub const LIGHT_STRENGTH: f32 = 5000.0;
-pub const LIGHT_COLOR: Color = Color::Srgba(WHITE); //GREEN_YELLOW
+pub const LIGHT_COLOR: Color = Color::Srgba(WHITE);
 
 pub const GIZMOS_AXES_LENGTH: f32 = 100.0;
 
-pub const CAMERA_FOV: f32 = 1.2; //0.785398; //45 degrees as radians
+pub const CAMERA_FOV: f32 = 1.2;
 
 pub const SIM_DT: f64 = 0.001;
 
@@ -344,14 +344,8 @@ enum DisplayText {
     StepsPerFrame,
 }
 
-// #[derive(Component, Default)]
-// struct MainCamera;
-
 #[derive(Component)]
 struct Particle(pub chaos::Coord);
-
-// #[derive(Component, Default)]
-// struct MouseLight;
 
 /*
     Bundles
@@ -398,7 +392,6 @@ fn draw_axes(mut gizmos: Gizmos) {
 fn mouse_click_system(
     mut cmd: Commands, 
     q_window: Query<&Window, With<PrimaryWindow>>,
-    // q_camera: Query<(&Camera, &GlobalTransform)>,
     cube_mesh_material: Res<CubeMeshMaterial>,
     q_camera: Query<(
         &PanOrbitState,
@@ -407,7 +400,6 @@ fn mouse_click_system(
     mut pc: ResMut<ParticleCount>,
     keys: Res<ButtonInput<KeyCode>>,
 ) {
-    // let (camera, camera_transform) = q_camera.single();
     let bunch_spawn = keys.pressed(KeyCode::ShiftLeft);
     let window = q_window.single();
     let mut rng = rand::thread_rng();
@@ -456,57 +448,12 @@ fn transform_particle_system(mut particles: Query<(&Particle, &mut Transform)>) 
     }
 }
 
-//LIGHT_EXPERIMENTAL
-// fn light_follow_mouse(
-//     mut spotlight: Query<&mut Transform, With<MouseLight>>,
-//     q_window: Query<&Window, With<PrimaryWindow>>,
-//     q_camera: Query<(
-//         &PanOrbitState,
-//         &Transform,
-//     ), Without<MouseLight>>
-// ) {
-//     let mut light_transform = spotlight.single_mut();
-//     let window = q_window.single();
-    
-//     for (state, transform) in &q_camera {
-    
-//         if let Some(world_position) = window.cursor_position() {
-        
-//             let half_height = window.height()/2.0;
-//             let half_width = window.width()/2.0;
-//             let px = (world_position.x / half_width) - 1.0;
-//             let py = (world_position.y / half_height) - 1.0;
-//             let dx = state.radius * (CAMERA_FOV / 2.0).tan() * px * (half_width/half_height);
-//             let dy = state.radius * (CAMERA_FOV / 2.0).tan() * py; //fov is vertical AND half of CAMERA_FOV (half screen, it's weird)
-//             let point_at = state.center + transform.down()*dy + transform.right()*dx;
-
-//             *light_transform = Transform::from_translation(transform.translation)
-//                 .looking_at(point_at, Vec3::Z);
-//         }
-//     }
-// }
-
 fn init_lighting(mut cmd: Commands) {
     // ambient light
     cmd.insert_resource(AmbientLight {
         color: LIGHT_COLOR.into(),
         brightness: LIGHT_STRENGTH,
     });
-
-    //LIGHT_EXPERIMENTAL
-    // cmd.spawn((MouseLight, SpotLightBundle {
-    //     transform: Transform::from_xyz(-1.0, 2.0, 0.0)
-    //         .looking_at(Vec3::new(-1.0, 0.0, 0.0), Vec3::Z),
-    //     spot_light: SpotLight {
-    //         intensity: 100_000.0,
-    //         color: WHITE.into(),
-    //         shadows_enabled: true,
-    //         inner_angle: 1.0,//0.6,
-    //         outer_angle: 1.2,//0.8,
-    //         ..default()
-    //     },
-    //     ..default()
-    // }));
 }
 
 fn init_text(mut cmd: Commands) {
@@ -630,7 +577,7 @@ fn display_stats(diagnostics: Res<DiagnosticsStore>, mut dtexts: Query<(&mut Tex
             }
             DisplayText::DeltaTime => {
                 let pnum = f32::powf(2.0, eq.dt_mult);
-                text.sections[0].value = format!("dt={pnum:>4.0}", );
+                text.sections[0].value = format!("dt={pnum:.2}", );
             }
         }
     }
@@ -645,12 +592,6 @@ fn despawn_all_particles(
     for entity in query.iter() {
         cmd.entity(entity).despawn();
     }
-}
-
-fn print_particle_num(
-    query: Query<Entity, With<Particle>>
-) {
-    println!("--number of particles: {}", query.iter().count());
 }
 
 /*
@@ -675,7 +616,6 @@ impl Plugin for ChaosPlugin {
             .add_systems(Update, draw_axes)
             .add_systems(Update, keybind_listener)
             .add_systems(Update, display_stats)
-            // .add_systems(Update, light_follow_mouse) //LIGHT_EXPERIMENTAL
             .add_systems(Update,
                 pan_orbit_camera
                     .run_if(any_with_component::<PanOrbitState>),
