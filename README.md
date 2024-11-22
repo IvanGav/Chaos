@@ -3,6 +3,27 @@
 
 It's a small chaos theory inspired demo.
 
-To run in debug mode: `$cargo run`. After compilation, click anywhere on the screen and 20 particles will be spawned (with up to 1.0 screen pixel deviation = 0.1 simulated pixel deviation). Watch them diverge down the line, even though they started at a basically the same location!
+Default equation is Lorenz Attractor.
 
-This project uses Rust Bevy.
+## Building
+
+- To run in debug mode: `$cargo run`
+- To build for release: `$cargo build --release` 
+    - the compiled exe will be here: `./target/release/Chaos.exe`
+
+## Controls
+
+- `LMB` - spawn a particle
+    - `Shift + LMB` - spawn a bunch of particles very close to each other
+- `Left Alt + Move Mouse` - orbit camera
+- `Left Ctrl + Move Mouse` - pan camera
+- `Z + Move Mouse` OR `Scroll Wheel` - zoom
+- Numpad `+`/`-` - increase/decrease amount of steps taken every frame
+- `[`/`]` - decrease/increase the delta time (will affect the simulation)
+    - Low dt will make everything converge at the origin. This is correct Lorenz Attractor behavior, as far as I understand.
+- `c` - clear the screen of particles
+
+## Credits
+
+- This project uses the Bevy Engine.
+- Ryan did not help making this project.
