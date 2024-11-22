@@ -288,7 +288,7 @@ struct ChaosEquationResource {
 impl FromWorld for ChaosEquationResource {
     fn from_world(_world: &mut World) -> Self {
         return ChaosEquationResource {
-            eq: chaos_equations::lorenz_attractor_equation,
+            eq: chaos_equations::lorenz_attractor_standard,
             steps: 1,
             dt_mult: 2.5,
         };
@@ -505,8 +505,13 @@ fn keybind_listener(mut cmd: Commands, keys: Res<ButtonInput<KeyCode>>, rem_part
     if keys.just_pressed(KeyCode::Digit1) {
         eq.eq = chaos::basic_equation;
     } else if keys.just_pressed(KeyCode::Digit2) {
-        eq.eq = chaos::lorenz_attractor_equation;
+        eq.eq = chaos::lorenz_attractor_standard;
+    } else if keys.just_pressed(KeyCode::Digit3) {
+        eq.eq = chaos::rossler_attractor_variant1;
+    } else if keys.just_pressed(KeyCode::Digit4) {
+        eq.eq = chaos::rossler_attractor_variant2;
     }
+
     if keys.just_pressed(KeyCode::NumpadAdd) {
         eq.steps += 1;
     } else if keys.just_pressed(KeyCode::NumpadSubtract) {
@@ -514,6 +519,7 @@ fn keybind_listener(mut cmd: Commands, keys: Res<ButtonInput<KeyCode>>, rem_part
             eq.steps -= 1;
         }
     }
+
     if keys.just_pressed(KeyCode::BracketRight) {
         eq.dt_mult += 0.2;
     } else if keys.just_pressed(KeyCode::BracketLeft) {
