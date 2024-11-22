@@ -1,8 +1,10 @@
+use bevy::ecs::system::SystemId;
 use bevy::input::common_conditions::{input_just_pressed, input_pressed};
-use bevy::render::camera::ScalingMode;
-use bevy::{diagnostic::FrameTimeDiagnosticsPlugin, prelude::*, window::PrimaryWindow};
+// use bevy::render::camera::ScalingMode;
+use bevy::{prelude::*, window::PrimaryWindow};
 use bevy::color::palettes::css::*;
 use rand::Rng;
+use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 
 mod chaos_equations;
 
@@ -80,7 +82,7 @@ impl Default for PanOrbitSettings {
             zoom_sensitivity: 0.01,
             pan_key: Some(KeyCode::ControlLeft),
             orbit_key: Some(KeyCode::AltLeft),
-            zoom_key: Some(KeyCode::ShiftLeft),
+            zoom_key: Some(KeyCode::KeyZ),
             scroll_action: Some(PanOrbitAction::Zoom),
             scroll_line_sensitivity: 16.0, // 1 "line" == 16 "pixels of motion"
             scroll_pixel_sensitivity: 1.0,
@@ -116,6 +118,8 @@ fn pan_orbit_camera(
         &mut Transform,
     )>,
 ) {
+    // window.set_cursor_visibility(false);
+
     // First, accumulate the total amount of
     // mouse motion and scroll, from all pending events:
     let mut total_motion: Vec2 = evr_motion.read()
@@ -267,26 +271,32 @@ pub const LIGHT_COLOR: Color = Color::Srgba(WHITE); //GREEN_YELLOW
 
 pub const GIZMOS_AXES_LENGTH: f32 = 100.0;
 
-pub const CAMERA_FOV: f32 = 1.1; //0.785398; //45 degrees as radians
+pub const CAMERA_FOV: f32 = 1.2; //0.785398; //45 degrees as radians
 
-pub const SIM_DT: f64 = 0.006;
+pub const SIM_DT: f64 = 0.001;
 
 /*
     Resources
 */
 
 #[derive(Resource)]
-struct ChaosEquationResource(pub chaos::ChaosEq);
+struct ChaosEquationResource {
+    pub eq: chaos::ChaosEq, 
+    pub steps: u8,
+    pub dt_mult: f32,
+}
 
 impl FromWorld for ChaosEquationResource {
     fn from_world(_world: &mut World) -> Self {
-        return ChaosEquationResource(chaos_equations::lorenz_attractor_equation);
-        // return ChaosEquationResource(chaos_equations::basic_equation);
+        return ChaosEquationResource {
+            eq: chaos_equations::lorenz_attractor_equation,
+            steps: 1,
+            dt_mult: 2.5,
+        };
     }
 }
 
 #[derive(Resource)]
-
 pub struct CubeMeshMaterial(pub Handle<Mesh>, pub Handle<StandardMaterial>);
 
 impl FromWorld for CubeMeshMaterial {
@@ -294,19 +304,54 @@ impl FromWorld for CubeMeshMaterial {
         let mesh = world.get_resource_mut::<Assets<Mesh>>().unwrap().add(Cuboid::new(SIZE_PARTICLE, SIZE_PARTICLE, SIZE_PARTICLE));
         let material =  world.get_resource_mut::<Assets<StandardMaterial>>().unwrap().add(COLOR_PARTICLE);
         return CubeMeshMaterial(mesh,material);
+    }
+}
+
+#[derive(Resource)]
+pub struct OneShotSystems{pub despawn_particles: SystemId}
+
+impl FromWorld for OneShotSystems {
+    fn from_world(world: &mut World) -> Self {
+        let despawn = world.register_system(despawn_all_particles);
+        return OneShotSystems {
+            despawn_particles: despawn
+        };
 
     }
 }
 
+#[derive(Resource)]
+pub struct ParticleCount(pub i32);
+
+impl FromWorld for ParticleCount {
+    fn from_world(_world: &mut World) -> Self {
+        return ParticleCount(0);
+    }
+}
+
+// #[derive(Resource)]
+// pub struct SimSettings;
+
 /*
     Components
 */
+
+#[derive(Component)]
+enum DisplayText {
+    Fps,
+    ParticleCount,
+    DeltaTime,
+    StepsPerFrame,
+}
 
 // #[derive(Component, Default)]
 // struct MainCamera;
 
 #[derive(Component)]
 struct Particle(pub chaos::Coord);
+
+// #[derive(Component, Default)]
+// struct MouseLight;
 
 /*
     Bundles
@@ -358,9 +403,12 @@ fn mouse_click_system(
     q_camera: Query<(
         &PanOrbitState,
         &Transform,
-    )>
+    )>,
+    mut pc: ResMut<ParticleCount>,
+    keys: Res<ButtonInput<KeyCode>>,
 ) {
     // let (camera, camera_transform) = q_camera.single();
+    let bunch_spawn = keys.pressed(KeyCode::ShiftLeft);
     let window = q_window.single();
     let mut rng = rand::thread_rng();
     
@@ -374,25 +422,31 @@ fn mouse_click_system(
             let dx = state.radius * (CAMERA_FOV / 2.0).tan() * px * (half_width/half_height);
             let dy = state.radius * (CAMERA_FOV / 2.0).tan() * py; //fov is vertical AND half of CAMERA_FOV (half screen, it's weird)
             let spawn_at = state.center + transform.down()*dy + transform.right()*dx;
-            
-            // for _ in 0..20 {
-            //     // cmd.spawn(ParticleBundle::from_coord(world_to_virt_coord(2.0, 1.0, 1.0)));
-            //     let dx = rng.gen::<f64>().fract();
-            //     let dy = rng.gen::<f64>().fract();
-            //     let dz = rng.gen::<f64>().fract();
-            //     cmd.spawn(ParticleBundle::from_coord(
-            //         chaos::Coord{x:dx,y:dy,z:dz} + world_to_virt_coord(spawn_at.x, spawn_at.y, spawn_at.z),
-            //         &cube_mesh_material
-            //     ));
-            // }
-            cmd.spawn(ParticleBundle::from_coord(world_to_virt_coord(spawn_at.x, spawn_at.y, spawn_at.z), &cube_mesh_material));
+            if bunch_spawn {
+                for _ in 0..20 {
+                    // cmd.spawn(ParticleBundle::from_coord(world_to_virt_coord(2.0, 1.0, 1.0)));
+                    let dx = rng.gen::<f64>().fract();
+                    let dy = rng.gen::<f64>().fract();
+                    let dz = rng.gen::<f64>().fract();
+                    cmd.spawn(ParticleBundle::from_coord(
+                        chaos::Coord{x:dx,y:dy,z:dz} + world_to_virt_coord(spawn_at.x, spawn_at.y, spawn_at.z),
+                        &cube_mesh_material
+                    ));
+                }
+                pc.0 += 20;
+            } else {
+                cmd.spawn(ParticleBundle::from_coord(world_to_virt_coord(spawn_at.x, spawn_at.y, spawn_at.z), &cube_mesh_material));
+                pc.0 += 1;
+            }
         }
     }
 }
 
 fn vmove_particle_system(mut particles: Query<&mut Particle>, chaos_eq: Res<ChaosEquationResource>) {
     for mut particle in &mut particles {
-        particle.0 = chaos_eq.0(&particle.0,SIM_DT);
+        for _ in 0..chaos_eq.steps {
+            particle.0 = (chaos_eq.eq)(&particle.0, SIM_DT * (f32::powf(2.0, chaos_eq.dt_mult)) as f64);
+        }
     }
 }
 
@@ -402,6 +456,36 @@ fn transform_particle_system(mut particles: Query<(&Particle, &mut Transform)>) 
     }
 }
 
+//LIGHT_EXPERIMENTAL
+// fn light_follow_mouse(
+//     mut spotlight: Query<&mut Transform, With<MouseLight>>,
+//     q_window: Query<&Window, With<PrimaryWindow>>,
+//     q_camera: Query<(
+//         &PanOrbitState,
+//         &Transform,
+//     ), Without<MouseLight>>
+// ) {
+//     let mut light_transform = spotlight.single_mut();
+//     let window = q_window.single();
+    
+//     for (state, transform) in &q_camera {
+    
+//         if let Some(world_position) = window.cursor_position() {
+        
+//             let half_height = window.height()/2.0;
+//             let half_width = window.width()/2.0;
+//             let px = (world_position.x / half_width) - 1.0;
+//             let py = (world_position.y / half_height) - 1.0;
+//             let dx = state.radius * (CAMERA_FOV / 2.0).tan() * px * (half_width/half_height);
+//             let dy = state.radius * (CAMERA_FOV / 2.0).tan() * py; //fov is vertical AND half of CAMERA_FOV (half screen, it's weird)
+//             let point_at = state.center + transform.down()*dy + transform.right()*dx;
+
+//             *light_transform = Transform::from_translation(transform.translation)
+//                 .looking_at(point_at, Vec3::Z);
+//         }
+//     }
+// }
+
 fn init_lighting(mut cmd: Commands) {
     // ambient light
     cmd.insert_resource(AmbientLight {
@@ -409,19 +493,164 @@ fn init_lighting(mut cmd: Commands) {
         brightness: LIGHT_STRENGTH,
     });
 
-    // cmd.spawn(SpotLightBundle {
-    //     // transform: Transform::from_xyz(-1.0, 2.0, 0.0)
-    //     //     .looking_at(Vec3::new(-1.0, 0.0, 0.0), Vec3::Z),
+    //LIGHT_EXPERIMENTAL
+    // cmd.spawn((MouseLight, SpotLightBundle {
+    //     transform: Transform::from_xyz(-1.0, 2.0, 0.0)
+    //         .looking_at(Vec3::new(-1.0, 0.0, 0.0), Vec3::Z),
     //     spot_light: SpotLight {
     //         intensity: 100_000.0,
-    //         color: LIME.into(),
+    //         color: WHITE.into(),
     //         shadows_enabled: true,
-    //         inner_angle: 0.6,
-    //         outer_angle: 0.8,
+    //         inner_angle: 1.0,//0.6,
+    //         outer_angle: 1.2,//0.8,
     //         ..default()
     //     },
     //     ..default()
-    // });
+    // }));
+}
+
+fn init_text(mut cmd: Commands) {
+    cmd.spawn((DisplayText::Fps, TextBundle {
+        text: Text::from_section("--", TextStyle::default()),
+        style: Style {
+            position_type: PositionType::Absolute,
+            top: Val::Px(5.0),
+            left: Val::Px(5.0),
+            ..default()
+        },
+        ..default()
+    }));
+    cmd.spawn((DisplayText::ParticleCount, TextBundle {
+        text: Text::from_section("--", TextStyle::default()),
+        style: Style {
+            position_type: PositionType::Absolute,
+            top: Val::Px(25.0),
+            left: Val::Px(5.0),
+            ..default()
+        },
+        ..default()
+    }));
+    cmd.spawn((DisplayText::DeltaTime, TextBundle {
+        text: Text::from_section("--", TextStyle::default()),
+        style: Style {
+            position_type: PositionType::Absolute,
+            top: Val::Px(45.0),
+            left: Val::Px(5.0),
+            ..default()
+        },
+        ..default()
+    }));
+    cmd.spawn((DisplayText::StepsPerFrame, TextBundle {
+        text: Text::from_section("--", TextStyle::default()),
+        style: Style {
+            position_type: PositionType::Absolute,
+            top: Val::Px(65.0),
+            left: Val::Px(5.0),
+            ..default()
+        },
+        ..default()
+    }));
+}
+
+fn keybind_listener(mut cmd: Commands, keys: Res<ButtonInput<KeyCode>>, rem_particles: Res<OneShotSystems>, mut eq: ResMut<ChaosEquationResource>) {
+    if keys.just_pressed(KeyCode::KeyC) {
+        cmd.run_system(rem_particles.despawn_particles);
+    }
+    if keys.just_pressed(KeyCode::Digit1) {
+        eq.eq = chaos::basic_equation;
+    } else if keys.just_pressed(KeyCode::Digit2) {
+        eq.eq = chaos::lorenz_attractor_equation;
+    }
+    if keys.just_pressed(KeyCode::NumpadAdd) {
+        eq.steps += 1;
+    } else if keys.just_pressed(KeyCode::NumpadSubtract) {
+        if eq.steps != 0 {
+            eq.steps -= 1;
+        }
+    }
+    if keys.just_pressed(KeyCode::BracketRight) {
+        eq.dt_mult += 0.2;
+    } else if keys.just_pressed(KeyCode::BracketLeft) {
+        eq.dt_mult -= 0.2;
+    }
+}
+
+//some more stolen code for displaying fps
+fn display_stats(diagnostics: Res<DiagnosticsStore>, mut dtexts: Query<(&mut Text, &DisplayText)>, pc: Res<ParticleCount>, eq: Res<ChaosEquationResource>) {
+    for (mut text, text_type) in &mut dtexts {
+        match text_type {
+            DisplayText::Fps => {
+                // try to get a "smoothed" FPS value from Bevy
+                if let Some(value) = diagnostics
+                    .get(&FrameTimeDiagnosticsPlugin::FPS)
+                    .and_then(|fps| fps.smoothed())
+                {
+                    // Format the number as to leave space for 4 digits, just in case,
+                    // right-aligned and rounded. This helps readability when the
+                    // number changes rapidly.
+                    text.sections[0].value = format!("{value:>4.0}fps");
+
+                    // Let's make it extra fancy by changing the color of the
+                    // text according to the FPS value:
+                    text.sections[0].style.color = if value >= 120.0 {
+                        // Above 120 FPS, use green color
+                        Color::Srgba(GREEN)
+                    } else if value >= 60.0 {
+                        // Between 60-120 FPS, gradually transition from yellow to green
+                        Color::srgb(
+                            (1.0 - (value - 60.0) / (120.0 - 60.0)) as f32,
+                            1.0,
+                            0.0,
+                        )
+                    } else if value >= 30.0 {
+                        // Between 30-60 FPS, gradually transition from red to yellow
+                        Color::srgb(
+                            1.0,
+                            ((value - 30.0) / (60.0 - 30.0)) as f32,
+                            0.0,
+                        )
+                    } else {
+                        // Below 30 FPS, use red color
+                        Color::Srgba(RED)
+                    }
+                } else {
+                    // display "N/A" if we can't get a FPS measurement
+                    // add an extra space to preserve alignment
+                    text.sections[0].value = " N/A".into();
+                    text.sections[0].style.color = Color::WHITE;
+                }
+            }
+            DisplayText::ParticleCount => {
+                let pnum = pc.0;
+                text.sections[0].value = format!("{} particles", pnum);
+            }
+            DisplayText::StepsPerFrame => {
+                let pnum = eq.steps;
+                text.sections[0].value = format!("{} steps per frame", pnum);
+            }
+            DisplayText::DeltaTime => {
+                let pnum = f32::powf(2.0, eq.dt_mult);
+                text.sections[0].value = format!("dt={pnum:>4.0}", );
+            }
+        }
+    }
+}
+
+fn despawn_all_particles(
+    mut cmd: Commands,
+    query: Query<Entity, With<Particle>>,
+    mut pc: ResMut<ParticleCount>,
+) {
+    pc.0 = 0;
+    for entity in query.iter() {
+        cmd.entity(entity).despawn();
+    }
+}
+
+fn print_particle_num(
+    query: Query<Entity, With<Particle>>
+) {
+    println!("--number of particles: {}", query.iter().count());
 }
 
 /*
@@ -435,12 +664,18 @@ impl Plugin for ChaosPlugin {
         app
             .init_resource::<ChaosEquationResource>()
             .init_resource::<CubeMeshMaterial>()
+            .init_resource::<OneShotSystems>()
+            .init_resource::<ParticleCount>()
             .add_systems(Startup, spawn_camera)
             .add_systems(Startup, init_lighting)
+            .add_systems(Startup, init_text)
             .add_systems(FixedUpdate, vmove_particle_system)
             .add_systems(Update, transform_particle_system)
             .add_systems(Update, mouse_click_system.run_if(input_pressed(MouseButton::Left)))
             .add_systems(Update, draw_axes)
+            .add_systems(Update, keybind_listener)
+            .add_systems(Update, display_stats)
+            // .add_systems(Update, light_follow_mouse) //LIGHT_EXPERIMENTAL
             .add_systems(Update,
                 pan_orbit_camera
                     .run_if(any_with_component::<PanOrbitState>),
@@ -460,7 +695,7 @@ fn world_to_virt_coord(x: f32, y: f32, z: f32)->chaos::Coord {
     };
 }
 
-fn world_to_virt(t: &Transform)->chaos::Coord {
+fn _world_to_virt(t: &Transform)->chaos::Coord {
     return chaos::Coord {
         x: t.translation.x as f64 / VIRT_ZOOM,
         y: t.translation.y as f64 / VIRT_ZOOM,
@@ -476,10 +711,6 @@ fn virt_to_world_mut(c: &chaos::Coord, t: &mut Transform) {
     t.translation.x = (c.x * VIRT_ZOOM) as f32;
     t.translation.y = (c.y * VIRT_ZOOM) as f32;
     t.translation.z = (c.z * VIRT_ZOOM) as f32;
-}
-
-fn screen_to_virt(x: f32, y: f32)->chaos::Coord {
-    return chaos::Coord{x: x as f64, y: y as f64, z:0.0};
 }
 
 /*
